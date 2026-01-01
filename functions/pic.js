@@ -15,37 +15,131 @@ function isMobileDevice(userAgent) {
 
   var lowerUserAgent = userAgent.toLowerCase();
 
-  // 检查移动设备关键词
   for (var i = 0; i < mobileKeywords.length; i++) {
     if (lowerUserAgent.includes(mobileKeywords[i].toLowerCase())) {
       return true;
     }
   }
 
-  // 检查移动设备正则表达式
   var mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i;
   return mobileRegex.test(userAgent);
 }
 
-// 图片配置
-const imageConfig = {
-  // 普通图片
-  h: { path: '/ri/h/', max: 882 },
-  v: { path: '/ri/v/', max: 3289 },
-  // R18图片
-  r18h: { path: '/ri/r18/h/', max: 100 },
-  r18v: { path: '/ri/r18/v/', max: 100 },
-  // PID图片
-  pidh: { path: '/ri/pid/h/', max: 100 },
-  pidv: { path: '/ri/pid/v/', max: 100 }
+// GitHub 仓库配置
+const GITHUB_OWNER = 'Hurt-In-Dream';
+const GITHUB_REPO = 'EdgeOne_Function_PicAPI';
+const GITHUB_BRANCH = 'main';
+
+// 图片目录配置
+const imageDirs = {
+  h: 'ri/h',
+  v: 'ri/v',
+  r18h: 'ri/r18/h',
+  r18v: 'ri/r18/v',
+  pidh: 'ri/pid/h',
+  pidv: 'ri/pid/v'
 };
 
-// 生成随机图片URL
-function getRandomImageUrl(type) {
-  const config = imageConfig[type];
-  if (!config) return null;
+// 缓存对象 - 存储每个目录的文件数量
+// 格式: { [dir]: { count: number, timestamp: number } }
+const cache = {};
+const CACHE_TTL = 5 * 60 * 1000; // 缓存 5 分钟
 
-  const randomNum = Math.floor(Math.random() * config.max) + 1;
+/**
+ * 从 GitHub API 获取目录中的文件数量
+ * @param {string} dir - 目录路径
+ * @returns {Promise<number>} - 文件数量
+ */
+async function getFileCount(dir) {
+  // 检查缓存
+  const now = Date.now();
+  if (cache[dir] && (now - cache[dir].timestamp) < CACHE_TTL) {
+    return cache[dir].count;
+  }
+
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${dir}?ref=${GITHUB_BRANCH}`;
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'EdgeOne-Function'
+      }
+    });
+
+    if (!response.ok) {
+      // 如果目录不存在或请求失败，返回缓存值或默认值
+      if (cache[dir]) {
+        return cache[dir].count;
+      }
+      return 1; // 至少返回 1 避免除零错误
+    }
+
+    const files = await response.json();
+
+    if (!Array.isArray(files)) {
+      return cache[dir]?.count || 1;
+    }
+
+    // 只计算 .webp 文件，并找到最大编号
+    let maxNum = 0;
+    for (const file of files) {
+      const match = file.name.match(/^(\d+)\.webp$/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    }
+
+    // 如果没有找到任何编号文件，使用文件总数
+    const count = maxNum > 0 ? maxNum : files.length;
+
+    // 更新缓存
+    cache[dir] = { count, timestamp: now };
+
+    return count;
+  } catch (error) {
+    console.error(`Failed to fetch file count for ${dir}:`, error);
+    // 返回缓存值或默认值
+    return cache[dir]?.count || 1;
+  }
+}
+
+/**
+ * 获取所有目录的文件数量
+ * @returns {Promise<Object>} - 各目录的文件数量
+ */
+async function getAllCounts() {
+  const counts = {};
+
+  // 并行获取所有目录的数量
+  const promises = Object.entries(imageDirs).map(async ([key, dir]) => {
+    counts[key] = await getFileCount(dir);
+  });
+
+  await Promise.all(promises);
+  return counts;
+}
+
+/**
+ * 生成随机图片URL
+ * @param {string} type - 图片类型
+ * @param {Object} counts - 各目录的文件数量
+ * @returns {string|null} - 图片URL或null
+ */
+function getRandomImageUrl(type, counts) {
+  const dirMap = {
+    h: { path: '/ri/h/', count: counts.h },
+    v: { path: '/ri/v/', count: counts.v },
+    r18h: { path: '/ri/r18/h/', count: counts.r18h },
+    r18v: { path: '/ri/r18/v/', count: counts.r18v },
+    pidh: { path: '/ri/pid/h/', count: counts.pidh },
+    pidv: { path: '/ri/pid/v/', count: counts.pidv }
+  };
+
+  const config = dirMap[type];
+  if (!config || config.count < 1) return null;
+
+  const randomNum = Math.floor(Math.random() * config.count) + 1;
   return config.path + randomNum + '.webp';
 }
 
@@ -68,52 +162,64 @@ async function handleRequest(request) {
     var userAgent = request.headers.get('User-Agent') || '';
     var isMobile = isMobileDevice(userAgent);
 
+    // 获取所有目录的文件数量
+    const counts = await getAllCounts();
+
     // 横屏图片
     if (imgType === 'h') {
-      return redirectToImage(getRandomImageUrl('h'));
+      const imageUrl = getRandomImageUrl('h', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // 竖屏图片
     if (imgType === 'v') {
-      return redirectToImage(getRandomImageUrl('v'));
+      const imageUrl = getRandomImageUrl('v', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // 自适应图片
     if (imgType === 'ua') {
       const type = isMobile ? 'v' : 'h';
-      return redirectToImage(getRandomImageUrl(type));
+      const imageUrl = getRandomImageUrl(type, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // R18 横屏图片
     if (imgType === 'r18h') {
-      return redirectToImage(getRandomImageUrl('r18h'));
+      const imageUrl = getRandomImageUrl('r18h', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // R18 竖屏图片
     if (imgType === 'r18v') {
-      return redirectToImage(getRandomImageUrl('r18v'));
+      const imageUrl = getRandomImageUrl('r18v', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // R18 自适应图片
     if (imgType === 'r18ua') {
       const type = isMobile ? 'r18v' : 'r18h';
-      return redirectToImage(getRandomImageUrl(type));
+      const imageUrl = getRandomImageUrl(type, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // PID 横屏图片
     if (imgType === 'pidh') {
-      return redirectToImage(getRandomImageUrl('pidh'));
+      const imageUrl = getRandomImageUrl('pidh', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // PID 竖屏图片
     if (imgType === 'pidv') {
-      return redirectToImage(getRandomImageUrl('pidv'));
+      const imageUrl = getRandomImageUrl('pidv', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // PID 自适应图片
     if (imgType === 'pidua') {
       const type = isMobile ? 'pidv' : 'pidh';
-      return redirectToImage(getRandomImageUrl(type));
+      const imageUrl = getRandomImageUrl(type, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
     }
 
     // 显示使用说明
@@ -131,13 +237,14 @@ async function handleRequest(request) {
     helpText += '• ?img=pidh  - 获取PID横屏随机图片\n';
     helpText += '• ?img=pidv  - 获取PID竖屏随机图片\n';
     helpText += '• ?img=pidua - 根据设备类型自动选择PID图片\n\n';
-    helpText += '📊 图片统计:\n';
-    helpText += '• 普通横屏: ' + imageConfig.h.max + ' 张\n';
-    helpText += '• 普通竖屏: ' + imageConfig.v.max + ' 张\n';
-    helpText += '• R18横屏: ' + imageConfig.r18h.max + ' 张\n';
-    helpText += '• R18竖屏: ' + imageConfig.r18v.max + ' 张\n';
-    helpText += '• PID横屏: ' + imageConfig.pidh.max + ' 张\n';
-    helpText += '• PID竖屏: ' + imageConfig.pidv.max + ' 张\n';
+    helpText += '📊 图片统计 (实时):\n';
+    helpText += '• 普通横屏: ' + counts.h + ' 张\n';
+    helpText += '• 普通竖屏: ' + counts.v + ' 张\n';
+    helpText += '• R18横屏: ' + counts.r18h + ' 张\n';
+    helpText += '• R18竖屏: ' + counts.r18v + ' 张\n';
+    helpText += '• PID横屏: ' + counts.pidh + ' 张\n';
+    helpText += '• PID竖屏: ' + counts.pidv + ' 张\n\n';
+    helpText += '💡 图片数量实时从 GitHub 获取，每 5 分钟更新一次\n';
 
     return new Response(helpText, {
       status: 200,
