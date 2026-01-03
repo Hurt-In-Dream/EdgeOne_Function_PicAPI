@@ -1,6 +1,6 @@
 // EdgeOne Pages Function export
 export function onRequest(context) {
-  return handleRequest(context.request);
+  return handleRequest(context.request, context.env);
 }
 
 // 检测是否为移动设备
@@ -25,92 +25,54 @@ function isMobileDevice(userAgent) {
   return mobileRegex.test(userAgent);
 }
 
-// GitHub 仓库配置
-const GITHUB_OWNER = 'Hurt-In-Dream';
-const GITHUB_REPO = 'EdgeOne_Function_PicAPI';
-const GITHUB_BRANCH = 'main';
-
-// 图片目录配置 - 包括标签目录
-const imageDirs = {
-  h: 'ri/h',
-  v: 'ri/v',
-  r18h: 'ri/r18/h',
-  r18v: 'ri/r18/v',
-  pidh: 'ri/pid/h',
-  pidv: 'ri/pid/v',
-  tagh: 'ri/tag/h',
-  tagv: 'ri/tag/v'
-};
-
-// 缓存对象 - 存储每个目录的文件数量
-const cache = {};
-const CACHE_TTL = 5 * 60 * 1000; // 缓存 5 分钟
+// 缓存对象
+let countsCache = null;
+let countsCacheTime = 0;
+const CACHE_TTL = 60 * 1000; // 1 分钟缓存
 
 /**
- * 从 GitHub API 获取目录中的文件数量
+ * 从本地 counts.json 文件获取图片数量
+ * 这个文件由 GitHub 同步功能自动更新
  */
-async function getFileCount(dir) {
+async function getCounts(request) {
   const now = Date.now();
-  if (cache[dir] && (now - cache[dir].timestamp) < CACHE_TTL) {
-    return cache[dir].count;
+
+  // 使用缓存
+  if (countsCache && (now - countsCacheTime) < CACHE_TTL) {
+    return countsCache;
   }
 
   try {
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${dir}?ref=${GITHUB_BRANCH}`;
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'EdgeOne-Function'
-      }
+    // 获取当前域名
+    const url = new URL(request.url);
+    const countsUrl = `${url.origin}/counts.json`;
+
+    const response = await fetch(countsUrl, {
+      cf: { cacheTtl: 60 } // Cloudflare edge cache
     });
 
-    if (!response.ok) {
-      if (cache[dir]) return cache[dir].count;
-      return 0;
+    if (response.ok) {
+      countsCache = await response.json();
+      countsCacheTime = now;
+      return countsCache;
     }
-
-    const files = await response.json();
-
-    if (!Array.isArray(files)) {
-      return cache[dir]?.count || 0;
-    }
-
-    // 只计算 .webp 文件，并找到最大编号
-    let maxNum = 0;
-    for (const file of files) {
-      const match = file.name.match(/^(\d+)\.webp$/);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxNum) maxNum = num;
-      }
-    }
-
-    const count = maxNum > 0 ? maxNum : 0;
-    cache[dir] = { count, timestamp: now };
-    return count;
-  } catch (error) {
-    console.error(`Failed to fetch file count for ${dir}:`, error);
-    return cache[dir]?.count || 0;
+  } catch (e) {
+    console.error('Failed to fetch counts.json:', e);
   }
+
+  // 返回默认值
+  return {
+    h: 0, v: 0,
+    r18h: 0, r18v: 0,
+    pidh: 0, pidv: 0,
+    tagh: 0, tagv: 0
+  };
 }
 
 /**
- * 获取所有目录的文件数量
- */
-async function getAllCounts() {
-  const counts = {};
-  const promises = Object.entries(imageDirs).map(async ([key, dir]) => {
-    counts[key] = await getFileCount(dir);
-  });
-  await Promise.all(promises);
-  return counts;
-}
-
-/**
- * 生成真正的随机数 - 使用加密随机
+ * 生成真正的随机数
  */
 function getSecureRandom(max) {
-  // 使用时间戳 + 随机数组合生成更随机的数
   const timestamp = Date.now();
   const random1 = Math.random();
   const random2 = Math.random();
@@ -141,10 +103,9 @@ function getRandomImageUrl(type, counts) {
 }
 
 /**
- * 从多个类型中随机选择一个并返回图片URL
+ * 从多个类型中随机选择
  */
 function getRandomFromTypes(types, counts) {
-  // 收集所有有效的类型和它们的权重(基于图片数量)
   const validTypes = [];
   let totalWeight = 0;
 
@@ -158,7 +119,6 @@ function getRandomFromTypes(types, counts) {
 
   if (validTypes.length === 0) return null;
 
-  // 根据权重随机选择一个类型
   let random = Math.random() * totalWeight;
   let selectedType = validTypes[0].type;
 
@@ -194,40 +154,8 @@ async function handleRequest(request) {
     var userAgent = request.headers.get('User-Agent') || '';
     var isMobile = isMobileDevice(userAgent);
 
-    // Debug mode - show GitHub API response directly
-    if (imgType === 'debug') {
-      const testDir = 'ri/h';
-      const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${testDir}?ref=${GITHUB_BRANCH}`;
-
-      try {
-        const response = await fetch(apiUrl, {
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'EdgeOne-Function'
-          }
-        });
-
-        const status = response.status;
-        const headers = Object.fromEntries(response.headers.entries());
-        const body = await response.text();
-
-        return new Response(JSON.stringify({
-          testUrl: apiUrl,
-          status,
-          rateLimit: headers['x-ratelimit-remaining'],
-          rateLimitReset: headers['x-ratelimit-reset'],
-          bodyPreview: body.substring(0, 500),
-        }, null, 2), {
-          headers: { 'Content-Type': 'application/json' }
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-    const counts = await getAllCounts();
+    // 获取图片数量 (从本地 counts.json)
+    const counts = await getCounts(request);
 
     // === 普通图片 ===
     if (imgType === 'h') {
@@ -280,7 +208,7 @@ async function handleRequest(request) {
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // === 标签搜索图片 (新增) ===
+    // === 标签搜索图片 ===
     if (imgType === 'tagh') {
       const imageUrl = getRandomImageUrl('tagh', counts);
       if (imageUrl) return redirectToImage(imageUrl);
@@ -297,40 +225,34 @@ async function handleRequest(request) {
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // === 全部图片随机 (新增) ===
-    // allh - 所有横屏图片 (普通+PID+标签)
+    // === 全部图片随机 ===
     if (imgType === 'allh') {
       const imageUrl = getRandomFromTypes(['h', 'pidh', 'tagh'], counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // allv - 所有竖屏图片 (普通+PID+标签)
     if (imgType === 'allv') {
       const imageUrl = getRandomFromTypes(['v', 'pidv', 'tagv'], counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // allua - 所有图片自适应 (普通+PID+标签)
     if (imgType === 'allua') {
       const types = isMobile ? ['v', 'pidv', 'tagv'] : ['h', 'pidh', 'tagh'];
       const imageUrl = getRandomFromTypes(types, counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // === 全部包含R18 (新增) ===
-    // allr18h - 所有横屏包含R18
+    // === 全部包含R18 ===
     if (imgType === 'allr18h') {
       const imageUrl = getRandomFromTypes(['h', 'pidh', 'tagh', 'r18h'], counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // allr18v - 所有竖屏包含R18
     if (imgType === 'allr18v') {
       const imageUrl = getRandomFromTypes(['v', 'pidv', 'tagv', 'r18v'], counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // allr18ua - 所有图片包含R18自适应
     if (imgType === 'allr18ua') {
       const types = isMobile ? ['v', 'pidv', 'tagv', 'r18v'] : ['h', 'pidh', 'tagh', 'r18h'];
       const imageUrl = getRandomFromTypes(types, counts);
@@ -379,7 +301,7 @@ async function handleRequest(request) {
     helpText += '• PID竖屏: ' + (counts.pidv || 0) + ' 张\n';
     helpText += '• R18横屏: ' + (counts.r18h || 0) + ' 张\n';
     helpText += '• R18竖屏: ' + (counts.r18v || 0) + ' 张\n\n';
-    helpText += '💡 数量实时获取，每 5 分钟更新\n';
+    helpText += '💡 数量从 counts.json 读取，同步图片时自动更新\n';
 
     return new Response(helpText, {
       status: 200,
