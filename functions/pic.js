@@ -194,6 +194,39 @@ async function handleRequest(request) {
     var userAgent = request.headers.get('User-Agent') || '';
     var isMobile = isMobileDevice(userAgent);
 
+    // Debug mode - show GitHub API response directly
+    if (imgType === 'debug') {
+      const testDir = 'ri/h';
+      const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${testDir}?ref=${GITHUB_BRANCH}`;
+
+      try {
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'EdgeOne-Function'
+          }
+        });
+
+        const status = response.status;
+        const headers = Object.fromEntries(response.headers.entries());
+        const body = await response.text();
+
+        return new Response(JSON.stringify({
+          testUrl: apiUrl,
+          status,
+          rateLimit: headers['x-ratelimit-remaining'],
+          rateLimitReset: headers['x-ratelimit-reset'],
+          bodyPreview: body.substring(0, 500),
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
     const counts = await getAllCounts();
 
     // === 普通图片 ===
