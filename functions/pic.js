@@ -70,14 +70,24 @@ async function getCounts(request) {
 }
 
 /**
- * 生成真正的随机数
+ * 生成真正的随机数 - 使用多种随机源
  */
 function getSecureRandom(max) {
-  const timestamp = Date.now();
-  const random1 = Math.random();
-  const random2 = Math.random();
-  const combined = (timestamp * random1 * random2) % max;
-  return Math.floor(Math.abs(combined)) + 1;
+  if (max <= 0) return 1;
+
+  // 使用 crypto API 如果可用
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint32Array(1);
+    crypto.getRandomValues(array);
+    return (array[0] % max) + 1;
+  }
+
+  // 回退方案：多个 Math.random() 组合
+  const r1 = Math.random();
+  const r2 = Math.random();
+  const r3 = Math.random();
+  const combined = Math.floor((r1 + r2 + r3) / 3 * max);
+  return (combined % max) + 1;
 }
 
 /**
