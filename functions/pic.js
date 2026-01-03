@@ -30,28 +30,26 @@ const GITHUB_OWNER = 'Hurt-In-Dream';
 const GITHUB_REPO = 'EdgeOne_Function_PicAPI';
 const GITHUB_BRANCH = 'main';
 
-// 图片目录配置
+// 图片目录配置 - 包括标签目录
 const imageDirs = {
   h: 'ri/h',
   v: 'ri/v',
   r18h: 'ri/r18/h',
   r18v: 'ri/r18/v',
   pidh: 'ri/pid/h',
-  pidv: 'ri/pid/v'
+  pidv: 'ri/pid/v',
+  tagh: 'ri/tag/h',
+  tagv: 'ri/tag/v'
 };
 
 // 缓存对象 - 存储每个目录的文件数量
-// 格式: { [dir]: { count: number, timestamp: number } }
 const cache = {};
 const CACHE_TTL = 5 * 60 * 1000; // 缓存 5 分钟
 
 /**
  * 从 GitHub API 获取目录中的文件数量
- * @param {string} dir - 目录路径
- * @returns {Promise<number>} - 文件数量
  */
 async function getFileCount(dir) {
-  // 检查缓存
   const now = Date.now();
   if (cache[dir] && (now - cache[dir].timestamp) < CACHE_TTL) {
     return cache[dir].count;
@@ -67,17 +65,14 @@ async function getFileCount(dir) {
     });
 
     if (!response.ok) {
-      // 如果目录不存在或请求失败，返回缓存值或默认值
-      if (cache[dir]) {
-        return cache[dir].count;
-      }
-      return 1; // 至少返回 1 避免除零错误
+      if (cache[dir]) return cache[dir].count;
+      return 0;
     }
 
     const files = await response.json();
 
     if (!Array.isArray(files)) {
-      return cache[dir]?.count || 1;
+      return cache[dir]?.count || 0;
     }
 
     // 只计算 .webp 文件，并找到最大编号
@@ -90,57 +85,92 @@ async function getFileCount(dir) {
       }
     }
 
-    // 如果没有找到任何编号文件，使用文件总数
-    const count = maxNum > 0 ? maxNum : files.length;
-
-    // 更新缓存
+    const count = maxNum > 0 ? maxNum : 0;
     cache[dir] = { count, timestamp: now };
-
     return count;
   } catch (error) {
     console.error(`Failed to fetch file count for ${dir}:`, error);
-    // 返回缓存值或默认值
-    return cache[dir]?.count || 1;
+    return cache[dir]?.count || 0;
   }
 }
 
 /**
  * 获取所有目录的文件数量
- * @returns {Promise<Object>} - 各目录的文件数量
  */
 async function getAllCounts() {
   const counts = {};
-
-  // 并行获取所有目录的数量
   const promises = Object.entries(imageDirs).map(async ([key, dir]) => {
     counts[key] = await getFileCount(dir);
   });
-
   await Promise.all(promises);
   return counts;
 }
 
 /**
+ * 生成真正的随机数 - 使用加密随机
+ */
+function getSecureRandom(max) {
+  // 使用时间戳 + 随机数组合生成更随机的数
+  const timestamp = Date.now();
+  const random1 = Math.random();
+  const random2 = Math.random();
+  const combined = (timestamp * random1 * random2) % max;
+  return Math.floor(Math.abs(combined)) + 1;
+}
+
+/**
  * 生成随机图片URL
- * @param {string} type - 图片类型
- * @param {Object} counts - 各目录的文件数量
- * @returns {string|null} - 图片URL或null
  */
 function getRandomImageUrl(type, counts) {
   const dirMap = {
-    h: { path: '/ri/h/', count: counts.h },
-    v: { path: '/ri/v/', count: counts.v },
-    r18h: { path: '/ri/r18/h/', count: counts.r18h },
-    r18v: { path: '/ri/r18/v/', count: counts.r18v },
-    pidh: { path: '/ri/pid/h/', count: counts.pidh },
-    pidv: { path: '/ri/pid/v/', count: counts.pidv }
+    h: { path: '/ri/h/', count: counts.h || 0 },
+    v: { path: '/ri/v/', count: counts.v || 0 },
+    r18h: { path: '/ri/r18/h/', count: counts.r18h || 0 },
+    r18v: { path: '/ri/r18/v/', count: counts.r18v || 0 },
+    pidh: { path: '/ri/pid/h/', count: counts.pidh || 0 },
+    pidv: { path: '/ri/pid/v/', count: counts.pidv || 0 },
+    tagh: { path: '/ri/tag/h/', count: counts.tagh || 0 },
+    tagv: { path: '/ri/tag/v/', count: counts.tagv || 0 }
   };
 
   const config = dirMap[type];
   if (!config || config.count < 1) return null;
 
-  const randomNum = Math.floor(Math.random() * config.count) + 1;
+  const randomNum = getSecureRandom(config.count);
   return config.path + randomNum + '.webp';
+}
+
+/**
+ * 从多个类型中随机选择一个并返回图片URL
+ */
+function getRandomFromTypes(types, counts) {
+  // 收集所有有效的类型和它们的权重(基于图片数量)
+  const validTypes = [];
+  let totalWeight = 0;
+
+  for (const type of types) {
+    const count = counts[type] || 0;
+    if (count > 0) {
+      validTypes.push({ type, count });
+      totalWeight += count;
+    }
+  }
+
+  if (validTypes.length === 0) return null;
+
+  // 根据权重随机选择一个类型
+  let random = Math.random() * totalWeight;
+  let selectedType = validTypes[0].type;
+
+  for (const item of validTypes) {
+    random -= item.count;
+    if (random <= 0) {
+      selectedType = item.type;
+      break;
+    }
+  }
+
+  return getRandomImageUrl(selectedType, counts);
 }
 
 // 返回图片重定向响应
@@ -149,7 +179,9 @@ function redirectToImage(imageUrl) {
     status: 302,
     headers: {
       'Location': imageUrl,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
       'Access-Control-Allow-Origin': '*'
     }
   });
@@ -162,106 +194,171 @@ async function handleRequest(request) {
     var userAgent = request.headers.get('User-Agent') || '';
     var isMobile = isMobileDevice(userAgent);
 
-    // 获取所有目录的文件数量
     const counts = await getAllCounts();
 
-    // 横屏图片
+    // === 普通图片 ===
     if (imgType === 'h') {
       const imageUrl = getRandomImageUrl('h', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // 竖屏图片
     if (imgType === 'v') {
       const imageUrl = getRandomImageUrl('v', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // 自适应图片
     if (imgType === 'ua') {
       const type = isMobile ? 'v' : 'h';
       const imageUrl = getRandomImageUrl(type, counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // R18 横屏图片
+    // === R18 图片 ===
     if (imgType === 'r18h') {
       const imageUrl = getRandomImageUrl('r18h', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // R18 竖屏图片
     if (imgType === 'r18v') {
       const imageUrl = getRandomImageUrl('r18v', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // R18 自适应图片
     if (imgType === 'r18ua') {
       const type = isMobile ? 'r18v' : 'r18h';
       const imageUrl = getRandomImageUrl(type, counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // PID 横屏图片
+    // === PID 图片 ===
     if (imgType === 'pidh') {
       const imageUrl = getRandomImageUrl('pidh', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // PID 竖屏图片
     if (imgType === 'pidv') {
       const imageUrl = getRandomImageUrl('pidv', counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
-    // PID 自适应图片
     if (imgType === 'pidua') {
       const type = isMobile ? 'pidv' : 'pidh';
       const imageUrl = getRandomImageUrl(type, counts);
       if (imageUrl) return redirectToImage(imageUrl);
     }
 
+    // === 标签搜索图片 (新增) ===
+    if (imgType === 'tagh') {
+      const imageUrl = getRandomImageUrl('tagh', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    if (imgType === 'tagv') {
+      const imageUrl = getRandomImageUrl('tagv', counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    if (imgType === 'tagua') {
+      const type = isMobile ? 'tagv' : 'tagh';
+      const imageUrl = getRandomImageUrl(type, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // === 全部图片随机 (新增) ===
+    // allh - 所有横屏图片 (普通+PID+标签)
+    if (imgType === 'allh') {
+      const imageUrl = getRandomFromTypes(['h', 'pidh', 'tagh'], counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // allv - 所有竖屏图片 (普通+PID+标签)
+    if (imgType === 'allv') {
+      const imageUrl = getRandomFromTypes(['v', 'pidv', 'tagv'], counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // allua - 所有图片自适应 (普通+PID+标签)
+    if (imgType === 'allua') {
+      const types = isMobile ? ['v', 'pidv', 'tagv'] : ['h', 'pidh', 'tagh'];
+      const imageUrl = getRandomFromTypes(types, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // === 全部包含R18 (新增) ===
+    // allr18h - 所有横屏包含R18
+    if (imgType === 'allr18h') {
+      const imageUrl = getRandomFromTypes(['h', 'pidh', 'tagh', 'r18h'], counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // allr18v - 所有竖屏包含R18
+    if (imgType === 'allr18v') {
+      const imageUrl = getRandomFromTypes(['v', 'pidv', 'tagv', 'r18v'], counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // allr18ua - 所有图片包含R18自适应
+    if (imgType === 'allr18ua') {
+      const types = isMobile ? ['v', 'pidv', 'tagv', 'r18v'] : ['h', 'pidh', 'tagh', 'r18h'];
+      const imageUrl = getRandomFromTypes(types, counts);
+      if (imageUrl) return redirectToImage(imageUrl);
+    }
+
+    // 计算总数
+    const totalH = (counts.h || 0) + (counts.pidh || 0) + (counts.tagh || 0);
+    const totalV = (counts.v || 0) + (counts.pidv || 0) + (counts.tagv || 0);
+    const totalR18H = totalH + (counts.r18h || 0);
+    const totalR18V = totalV + (counts.r18v || 0);
+
     // 显示使用说明
-    var helpText = '🖼️ 随机图片展示器\n\n';
+    var helpText = '🖼️ 随机图片 API\n\n';
     helpText += '📌 使用方法:\n\n';
     helpText += '【普通图片】\n';
-    helpText += '• ?img=h   - 获取横屏随机图片\n';
-    helpText += '• ?img=v   - 获取竖屏随机图片\n';
-    helpText += '• ?img=ua  - 根据设备类型自动选择图片\n\n';
-    helpText += '【R18图片】\n';
-    helpText += '• ?img=r18h  - 获取R18横屏随机图片\n';
-    helpText += '• ?img=r18v  - 获取R18竖屏随机图片\n';
-    helpText += '• ?img=r18ua - 根据设备类型自动选择R18图片\n\n';
+    helpText += '• ?img=h    - 横屏随机图片\n';
+    helpText += '• ?img=v    - 竖屏随机图片\n';
+    helpText += '• ?img=ua   - 设备自适应\n\n';
+    helpText += '【标签搜索】\n';
+    helpText += '• ?img=tagh  - 标签横屏随机\n';
+    helpText += '• ?img=tagv  - 标签竖屏随机\n';
+    helpText += '• ?img=tagua - 标签自适应\n\n';
     helpText += '【PID图片】\n';
-    helpText += '• ?img=pidh  - 获取PID横屏随机图片\n';
-    helpText += '• ?img=pidv  - 获取PID竖屏随机图片\n';
-    helpText += '• ?img=pidua - 根据设备类型自动选择PID图片\n\n';
-    helpText += '📊 图片统计 (实时):\n';
-    helpText += '• 普通横屏: ' + counts.h + ' 张\n';
-    helpText += '• 普通竖屏: ' + counts.v + ' 张\n';
-    helpText += '• R18横屏: ' + counts.r18h + ' 张\n';
-    helpText += '• R18竖屏: ' + counts.r18v + ' 张\n';
-    helpText += '• PID横屏: ' + counts.pidh + ' 张\n';
-    helpText += '• PID竖屏: ' + counts.pidv + ' 张\n\n';
-    helpText += '💡 图片数量实时从 GitHub 获取，每 5 分钟更新一次\n';
+    helpText += '• ?img=pidh  - PID横屏随机\n';
+    helpText += '• ?img=pidv  - PID竖屏随机\n';
+    helpText += '• ?img=pidua - PID自适应\n\n';
+    helpText += '【全部随机 (普通+标签+PID)】\n';
+    helpText += '• ?img=allh  - 所有横屏随机 (' + totalH + ' 张)\n';
+    helpText += '• ?img=allv  - 所有竖屏随机 (' + totalV + ' 张)\n';
+    helpText += '• ?img=allua - 所有自适应\n\n';
+    helpText += '【R18图片】\n';
+    helpText += '• ?img=r18h  - R18横屏随机\n';
+    helpText += '• ?img=r18v  - R18竖屏随机\n';
+    helpText += '• ?img=r18ua - R18自适应\n\n';
+    helpText += '【全部包含R18】\n';
+    helpText += '• ?img=allr18h  - 全部横屏含R18 (' + totalR18H + ' 张)\n';
+    helpText += '• ?img=allr18v  - 全部竖屏含R18 (' + totalR18V + ' 张)\n';
+    helpText += '• ?img=allr18ua - 全部自适应含R18\n\n';
+    helpText += '📊 图片统计:\n';
+    helpText += '• 排行横屏: ' + (counts.h || 0) + ' 张\n';
+    helpText += '• 排行竖屏: ' + (counts.v || 0) + ' 张\n';
+    helpText += '• 标签横屏: ' + (counts.tagh || 0) + ' 张\n';
+    helpText += '• 标签竖屏: ' + (counts.tagv || 0) + ' 张\n';
+    helpText += '• PID横屏: ' + (counts.pidh || 0) + ' 张\n';
+    helpText += '• PID竖屏: ' + (counts.pidv || 0) + ' 张\n';
+    helpText += '• R18横屏: ' + (counts.r18h || 0) + ' 张\n';
+    helpText += '• R18竖屏: ' + (counts.r18v || 0) + ' 张\n\n';
+    helpText += '💡 数量实时获取，每 5 分钟更新\n';
 
     return new Response(helpText, {
       status: 200,
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache'
       }
     });
 
   } catch (error) {
-    var errorDetails = '❌ 内部错误\n\n';
-    errorDetails += '错误消息: ' + error.message + '\n';
-    errorDetails += '错误堆栈: ' + error.stack + '\n';
-    errorDetails += '请求地址: ' + request.url + '\n';
-    errorDetails += '时间戳: ' + new Date().toISOString();
-
-    return new Response(errorDetails, {
+    return new Response('❌ 错误: ' + error.message, {
       status: 500,
       headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });

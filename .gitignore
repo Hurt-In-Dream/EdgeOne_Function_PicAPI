@@ -1,0 +1,7 @@
+# 忽略所有 webp 图片文件（只保留 .gitkeep）
+ri/**/*.webp
+
+# 本地开发
+node_modules/
+.env
+.env.local
