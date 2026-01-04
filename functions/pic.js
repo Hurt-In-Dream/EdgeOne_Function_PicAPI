@@ -167,6 +167,30 @@ async function handleRequest(request) {
     // 获取图片数量 (从本地 counts.json)
     const counts = await getCounts(request);
 
+    // Debug endpoint - 显示详细的调试信息
+    if (imgType === 'debug') {
+      // 生成 10 个随机数来测试分布
+      const testNumbers = [];
+      const testMax = counts.h || 10;
+      for (let i = 0; i < 10; i++) {
+        testNumbers.push(getSecureRandom(testMax));
+      }
+
+      return new Response(JSON.stringify({
+        counts: counts,
+        testRandomNumbers: testNumbers,
+        testMax: testMax,
+        cryptoAvailable: typeof crypto !== 'undefined' && !!crypto.getRandomValues,
+        cacheInfo: {
+          isCached: !!countsCache,
+          cacheAge: countsCache ? (Date.now() - countsCacheTime) + 'ms' : 'N/A'
+        },
+        timestamp: new Date().toISOString()
+      }, null, 2), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     // === 普通图片 ===
     if (imgType === 'h') {
       const imageUrl = getRandomImageUrl('h', counts);
