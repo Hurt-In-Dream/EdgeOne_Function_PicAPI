@@ -3,6 +3,54 @@ export function onRequest(context) {
   return handleRequest(context.request, context.env);
 }
 
+// Netlify Functions export (兼容 Netlify 平台)
+export async function handler(event, context) {
+  // 构建模拟的 Request 对象
+  const url = new URL(event.rawUrl || `https://example.com${event.path}`);
+
+  // 添加查询参数
+  if (event.queryStringParameters) {
+    for (const [key, value] of Object.entries(event.queryStringParameters)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const request = new Request(url.toString(), {
+    method: event.httpMethod,
+    headers: new Headers(event.headers || {})
+  });
+
+  try {
+    const response = await handleRequest(request);
+
+    // 将 Response 转换为 Netlify 格式
+    const headers = {};
+    response.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    // 处理重定向
+    if (response.status === 302) {
+      return {
+        statusCode: 302,
+        headers: headers,
+        body: ''
+      };
+    }
+
+    return {
+      statusCode: response.status,
+      headers: headers,
+      body: await response.text()
+    };
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: '❌ 错误: ' + error.message
+    };
+  }
+}
+
 // 检测是否为移动设备
 function isMobileDevice(userAgent) {
   if (!userAgent) return false;

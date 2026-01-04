@@ -1,0 +1,19 @@
+# Netlify 配置文件
+
+[build]
+  # 发布目录（静态文件）
+  publish = "."
+  # 函数目录 - 使用现有的 functions 目录
+  functions = "functions"
+
+# 将 /pic 路径重定向到 Netlify Functions
+[[redirects]]
+  from = "/pic"
+  to = "/.netlify/functions/pic"
+  status = 200
+
+# 处理带参数的请求 /pic?img=xxx
+[[redirects]]
+  from = "/pic/*"
+  to = "/.netlify/functions/pic/:splat"
+  status = 200
