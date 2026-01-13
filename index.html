@@ -638,8 +638,8 @@
             types.forEach(typeInfo => {
                 if (typeInfo.count === 0) return;
 
-                const sampleCount = Math.min(5, Math.ceil(typeInfo.count / 10));
-                for (let i = 0; i < sampleCount; i++) {
+
+                for (let i = 0; i < 1; i++) {
                     // 随机选择横屏或竖屏目录
                     const isHorizontal = Math.random() > 0.4;
                     const orientation = isHorizontal ? 'h' : 'v';
@@ -690,7 +690,7 @@
                     <div class="image-info">
                         <span class="image-category ${card.category}">${card.label}</span>
                         <div class="image-resolution">${card.resolution}</div>
-                        <div class="image-url">${card.imageUrl}</div>
+                        <div class="image-url">${card.apiUrl}</div>
                     </div>
                 </div>
             `).join('');
