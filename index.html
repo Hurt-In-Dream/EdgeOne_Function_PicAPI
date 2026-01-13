@@ -1,16 +1,636 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=/pic">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>随机图片 API</title>
-    <script>
-        // JavaScript 备用跳转
-        window.location.href = '/pic';
-    </script>
+    <title>随机图片 API - Pixiv 壁纸库</title>
+    <meta name="description" content="高质量二次元壁纸随机API，支持横屏、竖屏、R18等多种分类">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            color: #333;
+            overflow-x: hidden;
+            background: #f5f5f5;
+        }
+
+        /* 背景图片层 */
+        .bg-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url('/pic?img=allua') center/cover no-repeat;
+            z-index: -2;
+        }
+
+        /* 背景遮罩 */
+        .bg-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            z-index: -1;
+        }
+
+        /* 头部 */
+        .header {
+            text-align: center;
+            padding: 60px 20px 40px;
+            position: relative;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: white;
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+        }
+
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: #666;
+        }
+
+        /* 统计信息 */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            margin: 30px 20px;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s;
+        }
+
+        .stat-item:hover {
+            transform: translateY(-2px);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* 分类标签 */
+        .filters {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin: 20px;
+        }
+
+        .filter-btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 24px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #666;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .filter-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+        }
+
+        .filter-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        /* 瀑布流容器 */
+        .gallery {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            columns: 5;
+            column-gap: 20px;
+        }
+
+        @media (max-width: 1400px) {
+            .gallery {
+                columns: 4;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .gallery {
+                columns: 3;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .gallery {
+                columns: 2;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .gallery {
+                columns: 1;
+                padding: 10px;
+            }
+        }
+
+        /* 图片卡片 */
+        .image-card {
+            break-inside: avoid;
+            margin-bottom: 20px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .image-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .image-card img {
+            width: 100%;
+            display: block;
+            transition: transform 0.3s;
+        }
+
+        .image-card:hover img {
+            transform: scale(1.05);
+        }
+
+        .image-info {
+            padding: 12px;
+        }
+
+        .image-category {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #ffd700;
+            color: #333;
+            font-size: 12px;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .image-category.r18 {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .image-category.tag {
+            background: #51cf66;
+            color: white;
+        }
+
+        .image-category.pid {
+            background: #339af0;
+            color: white;
+        }
+
+        .image-resolution {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .image-url {
+            font-size: 11px;
+            color: #999;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* 使用说明 */
+        .usage {
+            max-width: 900px;
+            margin: 60px auto;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .usage h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .usage-section {
+            margin-bottom: 30px;
+        }
+
+        .usage-section h3 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .usage-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .usage-table th,
+        .usage-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .usage-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .usage-table code {
+            background: #f1f3f5;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #667eea;
+        }
+
+        /* 加载动画 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+            font-size: 14px;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
+
 <body>
-    <p>正在跳转到 <a href="/pic">随机图片 API</a>...</p>
+    <!-- 背景层 -->
+    <div class="bg-layer"></div>
+    <div class="bg-overlay"></div>
+
+    <!-- 头部 -->
+    <header class="header">
+        <div class="logo">🖼️</div>
+        <h1>Pixiv 随机图片 API</h1>
+        <p class="subtitle">高质量二次元壁纸 · 每日更新 · 开放接口</p>
+    </header>
+
+    <!-- 统计信息 -->
+    <div class="stats">
+        <div class="stat-item">
+            <div class="stat-label">横屏图片</div>
+            <div class="stat-value" id="stat-h">--</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">竖屏图片</div>
+            <div class="stat-value" id="stat-v">--</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">R18 图片</div>
+            <div class="stat-value" id="stat-r18">--</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">总计</div>
+            <div class="stat-value" id="stat-total">--</div>
+        </div>
+    </div>
+
+    <!-- 分类筛选 -->
+    <div class="filters">
+        <button class="filter-btn active" data-filter="all">全部图片</button>
+        <button class="filter-btn" data-filter="normal">普通图片</button>
+        <button class="filter-btn" data-filter="r18">R18 图片</button>
+        <button class="filter-btn" data-filter="tag">标签搜索</button>
+        <button class="filter-btn" data-filter="pid">PID 抓取</button>
+    </div>
+
+    <!-- 图片瀑布流 -->
+    <div class="gallery" id="gallery">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p style="margin-top: 20px;">加载图片中...</p>
+        </div>
+    </div>
+
+    <!-- 使用说明 -->
+    <div class="usage">
+        <h2>📖 使用说明</h2>
+
+        <div class="usage-section">
+            <h3>基础用法</h3>
+            <table class="usage-table">
+                <thead>
+                    <tr>
+                        <th>参数</th>
+                        <th>说明</th>
+                        <th>示例</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>?img=h</code></td>
+                        <td>横屏随机图片</td>
+                        <td><code>/pic?img=h</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=v</code></td>
+                        <td>竖屏随机图片</td>
+                        <td><code>/pic?img=v</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=ua</code></td>
+                        <td>设备自适应（移动端竖屏，桌面端横屏）</td>
+                        <td><code>/pic?img=ua</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="usage-section">
+            <h3>R18 图片</h3>
+            <table class="usage-table">
+                <thead>
+                    <tr>
+                        <th>参数</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>?img=r18h</code></td>
+                        <td>R18 横屏随机</td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=r18v</code></td>
+                        <td>R18 竖屏随机</td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=r18ua</code></td>
+                        <td>R18 自适应</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="usage-section">
+            <h3>高级用法</h3>
+            <table class="usage-table">
+                <thead>
+                    <tr>
+                        <th>参数</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>?img=allh</code></td>
+                        <td>所有横屏随机（普通+标签+PID）</td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=allr18h</code></td>
+                        <td>全部横屏含R18</td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=tagh</code></td>
+                        <td>标签搜索横屏</td>
+                    </tr>
+                    <tr>
+                        <td><code>?img=pidh</code></td>
+                        <td>PID抓取横屏</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="usage-section">
+            <p style="text-align: center; color: #666; margin-top: 30px;">
+                💡 所有图片均来自 Pixiv 每日排行榜和标签搜索<br>
+                🔄 图片库每日自动更新<br>
+                ⚡ EdgeOne CDN 加速，访问速度快
+            </p>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <p>Powered by <a href="https://github.com/Hurt-In-Dream/PIXIV-GETNEW" target="_blank">PIXIV-GETNEW</a></p>
+        <p style="margin-top: 10px; font-size: 12px;">图片版权归原作者所有 · 仅供学习交流使用</p>
+    </footer>
+
+    <script>
+        // 获取统计数据
+        async function loadStats() {
+            try {
+                const response = await fetch('/counts.json');
+                const counts = await response.json();
+
+                // 计算总数
+                const totalH = (counts.h || 0) + (counts.pidh || 0) + (counts.tagh || 0);
+                const totalV = (counts.v || 0) + (counts.pidv || 0) + (counts.tagv || 0);
+                const totalR18 = (counts.r18h || 0) + (counts.r18v || 0);
+                const total = totalH + totalV + totalR18;
+
+                // 更新统计显示
+                document.getElementById('stat-h').textContent = totalH;
+                document.getElementById('stat-v').textContent = totalV;
+                document.getElementById('stat-r18').textContent = totalR18;
+                document.getElementById('stat-total').textContent = total;
+
+                return counts;
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+                return null;
+            }
+        }
+
+        // 生成示例图片
+        async function loadGallery(filter = 'all') {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = '<div class="loading"><div class="loading-spinner"></div><p style="margin-top: 20px;">加载图片中...</p></div>';
+
+            const counts = await loadStats();
+            if (!counts) {
+                gallery.innerHTML = '<p style="text-align: center; padding: 40px; color: #999;">加载失败</p>';
+                return;
+            }
+
+            // 定义图片类型
+            const imageTypes = {
+                all: [
+                    { type: 'h', label: '横屏', category: 'normal', count: counts.h || 0 },
+                    { type: 'v', label: '竖屏', category: 'normal', count: counts.v || 0 },
+                    { type: 'r18h', label: 'R18横', category: 'r18', count: counts.r18h || 0 },
+                    { type: 'r18v', label: 'R18竖', category: 'r18', count: counts.r18v || 0 },
+                    { type: 'tagh', label: '标签横', category: 'tag', count: counts.tagh || 0 },
+                    { type: 'tagv', label: '标签竖', category: 'tag', count: counts.tagv || 0 },
+                    { type: 'pidh', label: 'PID横', category: 'pid', count: counts.pidh || 0 },
+                    { type: 'pidv', label: 'PID竖', category: 'pid', count: counts.pidv || 0 }
+                ],
+                normal: [
+                    { type: 'h', label: '横屏', category: 'normal', count: counts.h || 0 },
+                    { type: 'v', label: '竖屏', category: 'normal', count: counts.v || 0 }
+                ],
+                r18: [
+                    { type: 'r18h', label: 'R18横', category: 'r18', count: counts.r18h || 0 },
+                    { type: 'r18v', label: 'R18竖', category: 'r18', count: counts.r18v || 0 }
+                ],
+                tag: [
+                    { type: 'tagh', label: '标签横', category: 'tag', count: counts.tagh || 0 },
+                    { type: 'tagv', label: '标签竖', category: 'tag', count: counts.tagv || 0 }
+                ],
+                pid: [
+                    { type: 'pidh', label: 'PID横', category: 'pid', count: counts.pidh || 0 },
+                    { type: 'pidv', label: 'PID竖', category: 'pid', count: counts.pidv || 0 }
+                ]
+            };
+
+            const types = imageTypes[filter] || imageTypes.all;
+            const cards = [];
+
+            // 为每种类型生成3-5张示例卡片
+            types.forEach(typeInfo => {
+                if (typeInfo.count === 0) return;
+
+                const sampleCount = Math.min(5, Math.ceil(typeInfo.count / 10));
+                for (let i = 0; i < sampleCount; i++) {
+                    const randomNum = Math.floor(Math.random() * typeInfo.count) + 1;
+                    const imageUrl = `/ri/${typeInfo.type.replace('h', '/h').replace('v', '/v').replace('r18/', 'r18/').replace('tag/', 'tag/').replace('pid/', 'pid/')}/${randomNum}.webp`;
+                    const apiUrl = `/pic?img=${typeInfo.type}`;
+
+                    const resolution = typeInfo.type.includes('h') ?
+                        `${Math.floor(Math.random() * 1000) + 1920}×${Math.floor(Math.random() * 500) + 1080}` :
+                        `${Math.floor(Math.random() * 500) + 1080}×${Math.floor(Math.random() * 1000) + 1920}`;
+
+                    cards.push({
+                        imageUrl,
+                        apiUrl,
+                        label: typeInfo.label,
+                        category: typeInfo.category,
+                        resolution,
+                        order: Math.random()
+                    });
+                }
+            });
+
+            // 随机排序
+            cards.sort((a, b) => a.order - b.order);
+
+            // 生成HTML
+            gallery.innerHTML = cards.map(card => `
+                <div class="image-card" onclick="window.open('${card.apiUrl}', '_blank')">
+                    <img src="${card.imageUrl}" alt="${card.label}" loading="lazy" onerror="this.parentElement.style.display='none'">
+                    <div class="image-info">
+                        <span class="image-category ${card.category}">${card.label}</span>
+                        <div class="image-resolution">${card.resolution}</div>
+                        <div class="image-url">${card.apiUrl}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 筛选按钮事件
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadGallery(btn.dataset.filter);
+            });
+        });
+
+        // 页面加载时初始化
+        loadGallery('all');
+    </script>
 </body>
+
 </html>
